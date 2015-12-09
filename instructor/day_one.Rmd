@@ -1,0 +1,646 @@
+---
+title: 'Day One: Cleaning and Visualization'
+author: "Dillon Niederhut"
+date: "December 9, 2015"
+output: pdf_document
+---
+
+```{r, echo=FALSE}
+#options(warn=-1)
+knitr::opts_knit$set(root.dir = '../')
+```
+
+# 1. Cleaning Data
+
+## introduction
+
+there are two major steps to data cleaning, which we will call 'sanitizing' and 'tidying'
+
+in sanitizing, our goal is to take each variable and force its values to be honest representations of its levels
+
+in tidying, we are arranging our data structurally such that each row contains exactly one observation, and each column contains exactly one kind of data about that observation (this is sometimes expressed in SQL terms as "An attribute must tell something about the key, the whole key, and nothing but the key, so help me Codd")
+
+## exporting data from other software can do weird things to numbers and factors
+
+it's usually better to DISABLE R's intuition about data types
+
+unless you already know the data is clean and has no non-factor strings in it (i.e. you are the one who created it)
+
+## exporting data from other software can do weird things to numbers and factors
+
+```{r}
+dirty <- read.csv('data/dirty.csv')
+str(dirty)
+```
+
+## it's usually better to DISABLE R's intuition about data types
+
+unless you already know the data is clean and has no non-factor strings in it (i.e. you are the one who created it)
+
+```{r}
+dirty <- read.csv('data/dirty.csv',stringsAsFactors = FALSE)
+str(dirty)
+```
+
+## let's start by removing the empty rows and columns
+
+> note - R 3.2.2 and later does this automatically in `read.table` via `blank.lines.skip` and `skipNul`
+
+```{r}
+dim(dirty)
+Filter(function(x)!all(is.na(x)), dirty)  
+dim(dirty)
+```
+
+## you can replace variable names
+
+and you should, if they are uninformative or long
+
+```{r}
+names(dirty)
+names(dirty) <- c("time", "height", "dept", "enroll", "birth.order")
+```
+
+## it's common for hand-coded data to have a signifier for subject-missingness 
+
+(to help differentiate it from your hand-coder forgetting to do something)
+
+```{r}
+dirty$enroll
+```
+
+## you should replace all of these values in your dataframe with R's missingness signifier, `NA`
+
+```{r}
+table(dirty$enroll)
+dirty$enroll[dirty$enroll=="999"] <- NA
+table(dirty$enroll, useNA = "ifany")
+```
+
+## that timestamp variable is not in a format R likes
+
+base R doesn't handle time well, so we need to get rid of the time part of the timestamp
+
+```{r}
+dirty$time
+dirty$time <- sub(' [0-9]+:[0-9]+:[0-9]+','',dirty$time)
+dirty$time
+```
+
+## let's fix some of those department spellings
+
+first, let's make this all lowercase
+
+```{r}
+dirty$dept
+dirty$dept <- tolower(dirty$dept)
+dirty$dept <- gsub(' ', '', dirty$dept)  # what did we just do?
+dirty$dept[4] <- "geology"
+dirty[dirty == "999"] <- NA
+```
+
+## then, you can coerce the data into the types they should be
+
+```{r}
+dirty$time <- as.Date(dirty$time,'%m/%d/%Y')
+dirty$dept <- as.factor(dirty$dept)
+dirty$enroll <- as.factor(dirty$enroll)
+dirty$birth.order <- as.numeric(dirty$birth.order)
+str(dirty)
+```
+
+## your turn!
+
+I've intentionally left the height variable alone. Take a look at it now. What happened here?
+
+# 2. Missingness
+
+## introduction
+
+there are many reasons why you might have missing data
+
+*AS LONG AS MISSINGNESS IS NOT CAUSED BY YOUR INDEPENDENT VARIABLE* this is fine
+
+deleting those observations is wasteful, but easy (listwise deletion)
+
+ignoring the individual missing data points is typical (casewise deletion)
+
+imputing mean values for missing data is possibly the worst thing you can do
+
+imputing via MI + error is currently the best option
+
+## listwise deletion is wasteful
+
+```{r}
+na.omit(dirty)
+```
+
+## casewise deletion is what R does internally
+
+```{r, eval=FALSE}
+nrow(dirty)
+sum(is.na(dirty$height))
+sum(is.na(dirty$birth.order))
+length(lm(height ~ birth.order, data=dirty)$fitted.values)
+```
+
+this is usually the default strategy
+
+## remember how we talked about the extensibility of R?
+
+amelia is a package that makes a complicated MI approach work without you knowing anything about its implementation
+
+```{r}
+library(Amelia)
+```
+
+## let's use this large dataset as an example
+
+```{r}
+large <- read.csv('data/large.csv')
+summary(large)
+nrow(na.omit(large))
+```
+
+## for it to work you need low missingness and large N
+
+```{r}
+a <- amelia(large,m = 1)
+print(a)
+```
+
+## amelia returns a list, where the first item is a list of your imputations
+
+we only did one, so here it is
+
+```{r}
+large.imputed <- a[[1]][[1]]
+summary(large.imputed)
+```
+
+## if you give it a tiny dataset, it will fuss at you
+
+```{r}
+a <- amelia(large[990:1000,],m = 1)
+print(a)
+```
+
+## your turn!
+
+imagine I'm interested in measuring the partial pressure of oxygen on academic performance, and I get these data:
+
+```{r}
+oxygen <- data.frame(kPa = c(0, 10, 20, 30, 40), test = c(NA, NA, 90, 95, NA))
+oxygen <- oxygen[sample(nrow(oxygen), 1000, replace=TRUE), ]
+```
+
+can I use amelia on this dataset? how should you fix this?
+
+# 3. Tidyness
+
+## introduction
+
+now that our data is clean, it's time to put it in a tidy format. this is a way of storing data that makes it easy to:
+
+1. make graphs
+2. run tests
+3. summarize
+4. transform into other formats
+
+we are basically trying to organize ourselves such that:
+
+1. any grouping is made on rows
+2. any testing is done between columns
+
+## an aside on testing
+
+in R, you use double symbols for testing
+
+```{r}
+1 == 2
+1 != 1
+1 >= 1
+```
+
+(you've already seen a couple of these)
+
+## tests return boolean vectors
+
+```{r}
+1 >= c(0,1,2)
+```
+
+## recall that boolean vectors need to be the same length or a divisor
+
+if your vectors are not multiples of each other, R will fuss at you
+
+```{r}
+c(1,2) >= c(1,2,3)
+c(1,2) >= c(1,2,3,4)     # why no warning this time? R recycles!
+```
+
+the combination of the length requirement, the lack of support in R for proper indexing, and missingness in your data will cause many headaches later on
+
+## subsetting data frames
+
+subsetting your data is where you will use this regularly
+
+```{r}
+dirty$birth.order == 2
+dirty[dirty$birth.order == 2, ]
+```
+
+## you can also select columns
+
+```{r}
+dirty[ ,'dept']
+```
+
+that empy space **before** the comma? that tells R to grab all the rows
+
+## you can also match elements from a vector
+
+```{r}
+good.things <- c("geology", "anthro")
+dirty[dirty$dept %in% good.things, ]
+```
+
+## most tidying can be done with two R packages 
+
+(plus a wrapper around the base string functions)
+
+```{r}
+library(reshape2)
+library(stringr)
+library(plyr)
+```
+
+## tidyness
+
+our goal here is to arrange our data such that each table is about one kind of thing: whether it is everything about a measurement, everything about a person, or everything about a group of people
+
+```{r}
+abnormal <- data.frame(name = c('Alice','Bob','Eve'),
+                       time1 = c(90,90,150),
+                       time2 = c(100,95,100))
+```
+
+this table is not tidy - why not?
+
+the table is about measurements, but each measurement does not have its own row, and each type of measurement value is represented by more than one column
+
+## `melt` takes wide frames and makes them long
+
+```{r}
+normal <- melt(data = abnormal, id.vars = 'name')
+normal
+```
+
+we can `melt` this dataframe down into a long format, which makes each row a unique observation, and then clean up the dataframe a bit
+
+```{r}
+normal$id <- seq(1:nrow(normal))
+names(normal) <- c('name','time','value','id')
+normal$time <- str_replace(normal$time,'time','')
+```
+
+## subsetting tidy data is easy
+
+now that we are in a tidy format, see how easy it is to subset
+
+```{r}
+normal[normal$time == 1,]
+normal[normal$name == 'Alice',]
+```
+
+and test
+
+```{r}
+t.test(value ~ time, data=normal)
+```
+
+## join tidy dataframes with `merge`
+
+imagine you have two datasets that you want to merge
+
+```{r}
+data.1 <- read.csv('data/merge_practice_1.csv')
+data.2 <- read.csv('data/merge_practice_2.csv')
+str(data.1)
+str(data.2)
+```
+
+sometimes the same people have differet jobs in different locations
+
+## you can do an *inner* join using merge
+
+```{r}
+merge(data.1, data.2, by = 'id')
+```
+
+that's no good - we lost half of our people! 
+
+inner joins are mostly used when you **only** want records that appear in both tables
+
+## if you want the union, you can use an outer join
+
+```{r}
+merge(data.1, data.2, by = 'id', all = TRUE)
+```
+
+this works basically the same as `join` in SQL
+
+## your turn!
+
+running merges is particularly useful when:
+
+a. your data is tidy; and,
+b. you want to add information with a lookup table
+
+in this case, you can store your lookup table as a dataframe, then merge it
+
+```{r}
+lookup <- read.csv('data/merge_practice_3.csv')
+str(lookup)
+```
+
+how would you merge these? 
+
+look at the third table - there is data for the population of Reno, NV - why doesn't this show up in the merged table?
+
+# 4. Transforming data
+
+## introduction
+
+because R started out as a functional language, it can be hard to modify data, especially in place
+
+in practice, if you want 100% control over how your frames are being modified, you'll be writing lots of `for` loops, which is messy
+
+luckily, there is a package that handles the common tasks for you
+
+```{r}
+library(dplyr)
+```
+
+## sort data with `arranage`
+
+base R syntax for sorting is a bit of a pain in that you have to create a sorting vector based on the values in a column, then subset the same dataframe and apply the sorting vector to the rows slice
+
+to demonstrate this, let's start by making a toy data frame
+
+```{r}
+toy <- data.frame(
+  id = c(1,1,1,2,2,2,3,3,3),
+  score.1 = c(90,94,40,80,80,80,76,80,82)
+)
+arrange(toy, score.1)
+```
+
+## select rows by pattern with `select`
+
+it's common for variables that measure similar things to have similar names, but selecting columns this was in base R requires running `grepl` on column names, then subsetting the dataframe and applying the logical vector to the column field
+
+```{r}
+toy$score.2 <- 100
+select(toy, score.1, score.2)
+select(toy, contains('score'))
+```
+
+## apply summary fucntions with `summarise`
+
+dplyr includes most of the base R summary statistics, along with:
+
+* `n()`
+* `n_distinct()`
+* `first()`
+* `last()`
+
+```{r}
+summarise(toy, n(), n_distinct(score.1), last(score.1))
+```
+
+## dplyr allows you to apply functions to groups
+
+so far, these have taken base R functions and made them faster (with C++ calls behind the scenes), easier to use, or both
+
+dplyr's real utility is in its grouped dataframes, which apply dplyr functions groupwise
+
+```{r}
+group_by(toy, id)
+summarise(group_by(toy, id), n(), n_distinct(score.1))
+```
+
+you can add as many functions as you want inbetween, but wrapping function call around function call can be hard to read (and write!)
+
+## you can pipe functions with the `%>%` operator
+
+this will look very familiar if you are used to working in bash
+
+```{r}
+toy %>% group_by(id) %>% summarise(n(), n_distinct(score.1))
+```
+
+## your turn!
+
+take another look at the D-Lab training feedback dataset, and see if you can use this grouping, selecting, and summarizing syntax to find out which department gives the highest average ratings
+
+imagine that you wanted to divide each rating by its department average - could you do this using dplyr and merge?
+
+# 5. Descriptive statistics
+
+## introduction
+
+data analysis generally procedes in two steps:
+
+1. exploratory data analysis (now)
+2. statistical inference (tomorrow)
+
+our treatment of exploratory analysis owes a lot to John Tukey and to the Grammar of Graphics 
+
+## let's load in some data about D-Lab feedback 
+
+```{r}
+load('data/feedback.Rda')
+str(dat)
+```
+
+## R provides two easy/simple summary functions in the base package
+
+```{r}
+summary(dat)
+table(dat$department)
+```
+
+think back to day one - how would we make weekdays out of the date variable?
+
+```{r}
+dat$wday <- factor(weekdays(dat$timestamp, abbreviate = TRUE), 
+                   levels = c('Mon','Tue','Wed','Thu','Fri','Sat','Sun')
+                   )
+summary(dat$wday)
+```
+
+## reshape provides a few more ways to aggregate things
+
+```{r}
+library(reshape2)
+dcast(dat[dat$gender == 'Female/Woman' | dat$gender == 'Male/Man',], department ~ gender)
+dcast(melt(dat, measure.vars = c('course.delivered')), wday ~ 'Delivered', fun.aggregate = mean)
+```
+
+## your turn!
+
+imagine you are interested in whether opinions about D-Lab vary based on academic position - how would you make a table about this?
+
+# 6. Plotting
+
+## every time you use `base::plot`, [Edward Tufte does something unkind to a cute animal](http://markandrewgoetz.com/blog/2009/11/my-new-wallpaper/)
+
+- we'll be using ggplot, R's implementation of the **grammar of graphics**
+
+- in this grammar, you use 'aesthetics' to define how data is mapped to objects the graph space
+
+- each graph space has at least three layers:
+    - theme/background/annotations
+    - axes
+    - objects
+
+- most objects are geometric shapes
+
+- some objects are statistics built on those shapes
+
+- you can stack as many layers as you like
+
+```{r}
+install.packages('ggplot2')
+library(ggplot2)
+```
+
+## use qplot for initial poking around
+
+it has very strong intuitions about what you want to see, and is not particularly customizable
+
+```{r}
+qplot(instructor.communicated, data = dat)
+qplot(wday, course.delivered, data = dat)
+```
+
+## for 1D cateforical, use bar
+
+```{r}
+ggplot(data=dat, aes(x=wday)) + geom_bar()
+```
+
+## for 1D continuous, use hist
+
+this is really just convenience for `geom_bar(stat = 'bin')`, as opposed to bar plots, whose `stat` is `'count'`
+
+```{r}
+ggplot(data=dat, aes(x=course.delivered)) + 
+  geom_histogram(binwidth=1)
+```
+
+you can add color to this plot
+
+```{r}
+ggplot(data=dat, aes(x=course.delivered)) + 
+  geom_histogram(binwidth=1, fill = 'gold', colour= 'blue')
+```
+
+GO BEARS
+
+## for many 1D variables, use a box plot
+
+these are handy for a whole bunch of reasons, and you should make them your close associates
+
+```{r}
+ggplot(data=dat, aes(x=gender,y=interest)) + geom_boxplot()
+```
+
+## to plot two continuous variables, use points
+
+```{r}
+ggplot(data=dat, aes(x=instructor.communicated, y=course.delivered)) + geom_point()
+```
+
+all of these values are discrete, which makes them hard to see
+
+## to scatter points randomy, use jitter
+
+this is really just convenience for `geom_point(position = jitter())` 
+
+```{r}
+ggplot(data=dat, aes(x=instructor.communicated, y=course.delivered)) + 
+  geom_jitter()
+```
+
+not only can you add color, you can make the color a mapping of other variables
+
+```{r}
+ggplot(data=dat, aes(x=instructor.communicated, y=course.delivered)) + 
+  geom_jitter(aes(colour = wday))
+```
+
+the last time we used `colour` it was not an aesthetic - why is it now?
+
+## you can stack layers until your eyes hurt
+
+```{r}
+ggplot(data=dat, aes(x=wday, y=course.delivered)) + 
+  geom_boxplot(colour = 'gold') + 
+  geom_jitter(colour = 'blue')
+```
+
+## add summary functions with smooth
+
+```{r}
+ggplot(data=dat, aes(x=instructor.communicated, y=course.delivered)) + 
+  geom_jitter() + 
+  stat_smooth(method = 'lm')
+```
+
+if you are using colour as an aesthetic, you'll produce stats for each color
+
+```{r}
+ggplot(data=dat, aes(x=instructor.communicated, y=course.delivered, colour = wday)) + 
+  geom_jitter() + 
+  stat_smooth(method = 'lm', se = FALSE)
+```
+
+## good scientists put units on their axes
+
+```{r}
+ggplot(data=dat, aes(x=instructor.communicated, y=course.delivered)) + 
+  geom_jitter() + 
+  stat_smooth(method = 'lm', colour = 'black') + 
+  xlab('How well the instructor communicated (1-7)') + 
+  ylab('How well the course delivered advertised content (1-7)') + 
+  ggtitle("I have no idea what I'm doing") 
+```
+
+the general point here is that every single object on this graph is customizable
+
+frequent customizations are very simple to add
+
+infrequent customizations will take a lot of tinkering on your part
+
+## facetting
+
+often useful for looking at relationships between three variables at the same time
+
+```{r}
+ggplot(data=dat, aes(x=instructor.communicated, y=course.delivered)) + 
+  geom_jitter() + 
+  stat_smooth(method = 'lm') +
+  facet_grid(. ~ useful)
+```
+
+## your turn!
+
+There were a lot of variables in this dataset that we did not look at today:
+
+```{r}
+names(data)
+```
+
+Choose two of those variables, and explore their distribution and relationship to each other. Can you conclude anything about the D-Lab based on the feedback?

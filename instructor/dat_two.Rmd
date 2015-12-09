@@ -1,0 +1,536 @@
+---
+title: 'Day Two: Linear Models'
+author: "Dillon Niederhut"
+date: "December 10, 2015"
+output: pdf_document
+---
+
+```{r, echo=FALSE}
+#options(warn=-1)
+knitr::opts_knit$set(root.dir = '../')
+```
+
+## review
+
+while everyone is getting settled, load these data into R and run through all the things we talked about yesterday.
+
+```{r}
+dat <- read.csv('data/primate_energetics.csv')
+```
+
+1. Are the data clean?
+2. Are there troubling patterns in missingness?
+3. Are the data tidy?
+4. What is this table about?
+5. Are there any obvious relationships to look at?
+
+# 1. Mean testing
+
+## introduction
+
+a picture is worth 1,000 words, but a p-value is worth a dissertation
+
+basically, inferential statistics is the application of probability theory to decide what is real and what isn't
+
+we'll start by trying to tell whether differences between group summaries are real
+
+## t.test with two vectors (default method)
+
+```{r}
+t.test(dat$RMR, dat$TEE)
+```
+
+note that R takes care of the defaults for you - what it is really computing is `t.test(dat$RMR, dat$TEE, alternative = "two.sided", paired = FALSE, var.equal = FALSE, mu = 0, conf.level = 0.95)
+
+how would you find this out for yourself?
+
+## t.test with subsets of one vector (default method)
+
+```{r}
+t.test(dat$W[dat$Clade == "Strepsirrhini"], dat$outside.W[dat$Clade == "Platyrrhini"])
+```
+
+recall that we mentioned inconsistency on day one - here it is, and in a big way
+
+## t.test with S3 method
+
+```{r}
+t.test(W ~ Clade, data = dat, subset = dat$Clade %in% c("Strepsirrhini", "Platyrrhini"))
+```
+
+## aov
+
+first, you would think anova would be called by `anova`, but that's reserved for conducting F-tests on lm objects
+
+second, you really shouldn't be using anova, but if you must do it in R, the syntax looks like this
+
+```{r}
+aov(W ~ Clade, data = dat)
+```
+
+this isn't particularly helpful, but remember that it is an object, and we can call other, more helpful functions, on that object
+
+remember our old friend `summary`? it works on almost everything
+
+```{r}
+model.1 <- aov(W ~ Clade, data = dat)
+summary(model.1)
+```
+
+## post-hoc testing
+
+that's a little better - but it doesn't tell us where that difference really is
+
+unfortunately, the only built-in test for multiple comparisons is Tukey's
+
+```{r}
+TukeyHSD(model.1)
+```
+
+## other post-hoc tests
+
+these require the `multcomp` package:
+
+```{r}
+library(multcomp)
+```
+
+then, we give a model and specify the method for multiple comparisons
+
+```{r}
+summary(glht(model.1, linfct=mcp(Clade = "Dunnett")))
+summary(glht(model.1, linfct=mcp(Clade = "Williams")))
+```
+
+# 2.0 linear models
+
+mean tests are really just a subset of linear models where your predictor is a category
+
+## cor.test (Pearson)
+ 
+earlier, we were looking at differences between the means of two variables
+
+but those variables were both continuous, so we can ask whether they are related
+
+```{r}
+cor.test(dat$W, dat$BrainW)
+```
+
+okay, so they're related - now what?
+
+## lm
+
+this is probably the closest you will get to building a linear model by hand
+
+this means lm is a powerful tool, but you have to know what you're doing
+
+the basic call is the S3 method
+
+```{r}
+model.1 <- lm(W ~ BrainW, data = dat)
+summary(model.1)
+```
+
+## R automatically one-hot encodes your categories
+
+```{r}
+model.2 <- lm(W ~ BrainW + Clade, data = dat)
+summary(model.2)
+```
+
+# 2.1 Contrasts
+
+## contrasts are useful for testing specific hypotheses
+
+With an F-test, you can learn that a variable is causing a difference, but not what that difference is. You can think about contrasts as a way to look at the levels of a variable and ask which level, or groups of levels, are causing the difference. Maybe all of the levels are involved, but each one only a little bit. Contrasts allow you to test this possibility too. 
+
+## the default contrast set for a factor is `contr.treatment`
+
+This is the same thing as 'one-hot encoding'. R treats the first level of the variable as the basis for comparison, and then every subsequent level is represented as a binary 'dummy' variable.
+
+```{r}
+contr.treatment(4)
+```
+
+## if your data don't follow a treatment logic, you can try the sum or Helmert contrasts
+
+```{r}
+contr.helmert(4)
+contr.sum(4)
+```
+
+## if your data have inherent order, try the polynomial contrast set
+
+```{r}
+contr.poly(4)
+```
+
+This produces linear and quadratic contrasts. It's a bit hard to see that though, right? This is because R is making all of the contrasts orthogonal for you. Non-orthogonal contrasts risk explaining the same bit of variance twice, and make you think that you are predicting more than you actually are.
+
+## assigning contrasts to a factor is easy
+
+The syntax looks like this:
+
+```{r}
+my.factor = factor(c('Dillon', 'Andrew', 'Shinhye', 'Patty'))
+contrasts(my.factor) <- contr.helmert
+contrasts(my.factor)
+```
+
+## but you don't have to let R do it for you
+
+The benefit to using R's built-ins is that they are guaranteed to be correct. But, sometimes, they are not really what you want
+
+```{r}
+my.contrast <- matrix(c(
+  -2, -1, 1, 2,
+  0, 0, 1, 1,
+  0, 1, 0, 1
+  ), nrow=4, ncol=3)
+contrasts(my.factor) <- my.contrast
+contrasts(my.factor)
+```
+
+## Your turn!
+
+Let's load in some real data from the data folder. This is a dataset containing information about different primates -  how large they are, how large their brains are, and how much energy they use in a day.
+
+```{r}
+dat <- read.csv('data/primate_energetics.csv')
+```
+
+Look at the variable `clade`. This variable contains five levels:
+
+--------------|------------------
+Strepsirrhini | lemurs and lorises
+Platyrrhini | New World monkeys like capuchins and howlers
+Cercopithecoidea | Old World monkeys like macaques and babboons
+Hominoidea | apes like gibbons and gorillas
+Homo | people like you
+
+How would you construct a contrast for this variable?
+
+# 2.2 Robusticity
+
+## Some assumptions of the linear model
+
+1. Errors are normally distributed
+2. Errors are independent
+3. Variation is homoscedastic
+4. X is measured without error
+
+## checking normality of errors
+
+Suppose we were interested in predicting body size from brain size. We could construct a model like this:
+
+```{r}
+model.1 <- lm(W ~ BrainW, data=dat)
+```
+
+And then plot the residuals from the model against a normal distribution
+
+```{r}
+qqnorm(model.1$residuals)
+qqline(model.1$residuals)
+```
+
+## checking independence of errors
+
+This one is pretty easy - you can simply regress your predictors on your residuals (or plot them)
+
+```{r}
+summary(lm(model.1$resid ~ BrainW, data=dat[!(is.na(dat$BrainW)), ]))
+```
+
+```{r}
+library(ggplot2)
+dat.1 <- dat[!(is.na(dat$BrainW)), ]
+dat.1$resid <- model.1$residuals
+ggplot(data=dat.1, aes(x=BrainW, y=resid)) + geom_jitter() + stat_smooth(method='lm')
+```
+
+## checking homoscedasticity of errors
+
+You can eyeball this by plotting your residuals against your predictor, and looking at rolling estimate of variance
+
+```{r}
+ggplot(data=dat.1, aes(x=BrainW, y=resid)) + geom_jitter() + stat_quantile()
+```
+
+A more formal test, called the Breusch-Pagan test, is found in the lmtest package. Essentially, it is just squaring the residuals and regressing your predictors on it.
+
+```{r}
+library(lmtest)
+bptest(model.1)
+```
+
+## checking for error in X
+
+There isn't really a way to establish statistically that your predictors have been measured without error. The good news is that linear models are fairly robust to violations of this assumption already. The better news is that if you suspect your predictors have very large margins of error, you can use major axis regressions.
+
+```{r}
+library(lmodel2)
+model.2 <- lmodel2(W ~ BrainW, data=dat, nperm=10)
+model.2
+```
+
+## linear models are very susceptible to outliers
+
+This isn't really an assumption that we are violating so much as a consequence of parameterizing with means (highly susceptible to outliers) and variance (squared outliers). You can test for outliers with various measures of leverage, including:
+
+1. DFBetas
+2. DFFit
+3. Cook's Distance
+
+These can be calculated with:
+
+```{r}
+influence.measures(model.1)
+```
+
+If you find your model contains high leverage cases, you can either pluck them out by hand (preferably by selecting against something like Cook's Distace), or try running a regression build to be robust to outliers.
+
+```{r}
+library(robust)
+model.3 <- lmRob(W ~ BrainW, data=dat)
+summary(model.3)
+```
+
+Exluding the outliers in this case has brought the coefficient of our predictor close to zero. Can you guess why? If you aren't sure, plot it.
+
+## your turn!
+
+So far we've been predicting body weight from brain weight. Try predicting body weight from brain weight and clade. Your base model should look like this:
+
+```
+  <- lm(W ~ BrainW + Clade, data=dat)
+```
+
+Rerun your regression diagnostics. What do you find?
+
+# 2.3 Stepwise Models and Uncertainty Reduction
+
+## fundamental constraints in prediction
+
+We'll start with the bad news. Any kind of predicting method is constrained in how many independent variables you can include in the model (this is why machine learning algorithms always start with a dimensionality reduction method like PCA).
+
+Let's do a little test to show how much of a problem this is. Run the code below a couple of times. How often do you get significant results? Keep in mind that these are randomly generated data, so we already know that there *shouldn't be* any significant predictors.
+
+```{r}
+dat.toy <- data.frame(value=runif(4), var1=runif(4), var2=runif(4))
+summary(lm(value ~ var1 + var2, data=dat.toy))
+```
+
+R won't let us run `lm` with four variables, but if it did, we would be able to 100% accurately predict four random number from four sets of other random numbers. Overfitting, combined with p hacking and the file drawer problem, are responsible for the giant world of false findings and irreproducable science that you keep hearing about. Generally speaking, it is bad science to throw predictors haphazardly into a model and see what comes out; however, there are times when this approach is either required or useful in its own right.
+
+## weeding out predictors the smart way
+
+It may happen to you in your life that you have no theory, hypothesis, or intuitions about how your predictors could be related to your outcome variable. In this case, you can weed out predictors using what is called a stepwise regression.
+
+```{r}
+library(MASS)
+dat.omit <- na.omit(dat)
+model.base <- lm(W ~ ., data=dat.omit)
+model.4 <- stepAIC(model.base)
+summary(model.4)
+```
+
+Doing it this way isn't particularly helpful - genera tend to be around the same body size, so really we are just recapitulating taxonomies here.
+
+## specifying forward stepwise models
+
+Part of the problem is that backwards models tend to keep predictors that aren't particularly useful. The other part of the problem is that we threw every variable we had into the model.
+
+```{r}
+model.base <- lm(W ~ 1, data=dat.omit)
+model.5 <- stepAIC(model.base, scope=list(upper = ~ W + BrainW + RMR + TEE), direction='forward')
+summary(model.5)
+```
+
+## comparing homogeneous models
+
+Stepwise regression is evalued by maximizing the likelihood that a model will reduce your uncertainty about the dependent variable. This can't be assessed in an exact sense, but models that differ only the inclusion of a parameter can be compared my relative likelihood (this is sometimes called comparing 'nested models'). This can be calculated with:
+
+```{r}
+p <- exp((model.5$anova$AIC[3] - model.5$anova$AIC[2]) / 2)
+p
+```
+
+To put it another way, the probability that the complex model is better is `r 1-p`.
+
+## your turn!
+
+So far, we've been predicting body weight from brain weight. What happens if you run the model the other way around? E.g., you try:
+
+```
+BrainW ~ .
+```
+
+# 2.4 Comparing Heterogeneous Models
+
+## visualizing prediction error
+
+One easy way to visualize this is to use make a dataframe out of your error terms and plot it.
+
+```{r}
+library(reshape2)
+errors <- data.frame(model.4 = model.4$residuals, model.5 = model.5$residuals)
+errors <- melt(errors)
+ggplot(data=errors, aes(x=variable, y=value)) + geom_boxplot(outlier.colour='red')
+```
+
+## quantifying prediction error
+
+* The good news: the math used to quantify prediction error is simple
+* The bad news: R will not do it for you
+
+> Cautionary note - none of these methods take model complexity into account
+
+## RMSE
+
+The root mean square error is the preferred mean-based way to quantify model fit. The math looks  like `sqrt(mean(error^2))`
+
+```{r}
+sqrt(mean(model.4$residuals**2))
+sqrt(mean(model.5$residuals**2))
+```
+
+## MdAE
+
+The median absolute error is the preferred median-based way to quantify model fit. It is particularly useful when a model's fit is unduly influenced by one or a few outliers. The math looks like `median(abs(error))`
+
+```{r}
+median(abs(model.4$residuals))
+median(abs(model.5$residuals))
+```
+
+> side note - this is sometimes abbreviated `MAD` for 'median absolute deviation', but it could also mean 'mean absolute deviation'
+
+## Your turn!
+
+You're going to compare two heterogeneous models for explaining body weight. Try using `TEE ~ W` and `TEE ~ RMR`. Which is a better fit?
+
+# 2.5 Generalized Models
+
+## lm assumes linear relationships
+
+The linear model we have been using is assuming a couple of things that we haven't talked much about. One of these is that the relationship between the predictors and the outcome is linear (as opposed to quadratic, for example). This assumption can often be met by nonlinear transforms of the data. For example, we've been using data that are usually analyzed after they've been log transformed.
+
+```{r}
+qplot(data=dat, x=BrainW, y=W)
+qplot(data=dat, x=BrainW, y=W, log='xy')
+```
+
+## lm also assumes normal variance
+
+This one is a little trickier. To show why this is a problem, let's make another toy dataset.
+
+```{r}
+dat.toy <- data.frame(x=1:10, y=1:10+rbinom(10, 1, .5))
+qplot(data=dat.toy, x=x, y=y)
+```
+
+If we predict `y` from `x` and plot the residuals against, x, we get:
+
+```{r}
+model.toy <- lm(y ~ x, data=dat.toy)
+dat.toy$resid <- model.toy$residuals
+qplot(data=dat.toy, x=x, y=resid)
+```
+
+The actual prediction equation here should be `y = 0.5 + x`, but because the errors around y are non-normal, linear regression produces an incorrect solution something like `r model.toy$coef[[1]]` + `r model.toy$coef[[2]]` x. This *usually* cannot be corrected by nonlinear transforms.
+
+## the generalized linear model
+
+The good news is that `lm` is a subset of of `glm` or generalized linear models, where the link is linear and the variance is normal. `lm` in R is really just a convenience function that (behind the scenes) is running: 
+
+```{r}
+summary(glm(y~x, data=dat.toy, family=gaussian))
+```
+
+You will typically only encounter two types of non-linear, linear models
+
+## the binomial family
+
+The binomial distribution models binary variables. Typically, this is presented as modeling coin flips, with a certain probability. 
+
+```{r}
+dat.toy <- data.frame(x=1:10, y=rbinom(10,1,0.5))
+summary(glm(y~x, data=dat.toy, family=binomial))
+```
+
+## the poisson family
+
+The poisson distribution models count variables. Typically, this is presented as something like 'how many people enter a store per minute'.
+
+```{r}
+data.toy <- data.frame(x=1:10, y=rpois(10,1))
+summary(glm(y~x, data=dat.toy, family=poisson))
+```
+
+## your turn!
+
+The binomial family glm is more commonly known as the logistic regression. In logistic regression, each 0 and 1 outcome is modeled as the odds ratio that a row will be equal to 0 or 1 based on the predictor variables. This is the engine behind most classification algorithms. 
+
+Let's go back to the `Clade` variable, and make a new binary variable based on it.
+
+```{r}
+dat$bin <- 0
+dat$bin[dat$Clade == 'Homo'] <- 1
+```
+
+Using logistic regression and the other variables in the dataset, find the best way to predict whether a case is from a human or not.
+
+# 3. Nonparametric
+
+parametric refers to using means, deviations, and other estimates of population parameters
+
+*BUT* what if you don't want to make assumptions about the structure of the population?
+
+## ranked variables
+
+a simple case is where means don't have meaning, such as likert variables
+
+all Likerts are really rank variables, which means they don't act like actual number-y numbers
+
+in the real world, a 6 foot tall person is twice as tall as a 3 foot tall person
+
+but is a level '6' really twice as many barriers to access as a '3'?
+
+we know that 6 is more than 3, but can't really say how much - in that sense then, a scale of 1-7 is exactly the same thing as a scale of a-g.
+
+## median testing ranks
+
+we use Mann-Whitney sums to test that the ranks are centered the same way
+
+```{r}
+likert.1 <- c(6,6,7,7,5,4)
+likert.2 <- c(5,5,4,7,1,2)
+wilcox.test(likert.1, likert.2, alternative = "two.sided", paired = FALSE, mu = 0, conf.level = 0.95)
+```
+
+see how this setup looks exactly like a t-test? that's not an accident
+
+## correlating ranks
+
+this is just like the `cor.test` you did above, but with `method` set to equal 'spearman' instead of pearson
+
+```{r}
+cor.test(likert.1, likert.2, method = 'spearman')
+```
+
+## chi-Squared
+
+what if both of your variables are categories? we can test their counts with R's built in `chisq.test` function
+
+```{r}
+chisq.test(dat$Method, dat$Clade)
+```
+
+## your turn!
+
+look through the primate dataset, and run an example of each non-parametric test (on variables that make sense!)
+
+```{r}
+str(dat)
+```
